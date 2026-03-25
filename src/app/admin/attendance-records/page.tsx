@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Pencil, Search, Trash2, X } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { Check, ChevronDown, ChevronRight, Download, Pencil, Search, Trash2, X } from "lucide-react";
+import ExcelJS from "exceljs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 import { GlassCard } from "@/components/shared/glass-card";
 import { PageLoadingSkeleton } from "@/components/shared/page-loading-skeleton";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
@@ -60,6 +65,30 @@ type SiteDateGroup = {
   siteIncharges: SiteInchargeGroup[];
 };
 
+type ExportFormat = "CSV" | "EXCEL" | "PDF";
+
+type PivotExportResponse = {
+  from: string;
+  to: string;
+  dates: string[];
+  rows: {
+    name: string;
+    values: Record<string, number | null>;
+  }[];
+  footer: {
+    foremanName: string;
+    siteInchargeName: string;
+    siteName: string;
+  };
+};
+
+type PreparedExportRow = {
+  name: string;
+  dateValues: Array<number | "">;
+  totalHours: number;
+  totalHaziri: number;
+};
+
 const defaultFilters: Filters = {
   workerSearch: "",
   siteFilter: "ALL",
@@ -67,6 +96,231 @@ const defaultFilters: Filters = {
   fromDate: "",
   toDate: "",
 };
+
+function toIsoDate(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function csvCell(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
+  const raw = String(value);
+  if (raw.includes(",") || raw.includes("\n") || raw.includes('"')) {
+    return `"${raw.replaceAll('"', '""')}"`;
+  }
+  return raw;
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildCsv(payload: PivotExportResponse) {
+  const dateLabels = payload.dates.map((date) => format(parseISO(date), "dd/MM/yyyy"));
+  const preparedRows: PreparedExportRow[] = payload.rows.map((row) => {
+    const dateValues = payload.dates.map((date) => {
+      const value = row.values[date];
+      return value === null || value === undefined ? "" : Number(value);
+    });
+
+    const totalHours = dateValues.reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+    const totalHaziri = Number((totalHours / 8).toFixed(2));
+
+    return {
+      name: row.name,
+      dateValues,
+      totalHours,
+      totalHaziri,
+    };
+  });
+
+  const header = ["**Name**", ...dateLabels.map((d) => `**${d}**`), "", "", "**Total Hours**", "", "", "**Total Haziri**"];
+  const dataRows = preparedRows.map((row) => [`**${row.name}**`, ...row.dateValues.map((v) => (typeof v === "number" ? `**${v}**` : v)), "", "", `**${row.totalHours}**`, "", "", `**${row.totalHaziri}**`]);
+  const footerRows = [
+    [],
+    ["**Foreman Name**", `**${payload.footer.foremanName}**`],
+    ["**Site Incharge Name**", `**${payload.footer.siteInchargeName}**`],
+    ["**Site Name**", `**${payload.footer.siteName}**`],
+  ];
+
+  return [...[header], ...dataRows, ...footerRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+
+async function buildExcel(payload: PivotExportResponse) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Attendance");
+
+  const dateLabels = payload.dates.map((date) => format(parseISO(date), "dd/MM/yyyy"));
+  const preparedRows: PreparedExportRow[] = payload.rows.map((row) => {
+    const dateValues = payload.dates.map((date) => {
+      const value = row.values[date];
+      return value === null || value === undefined ? "" : Number(value);
+    });
+
+    const totalHours = dateValues.reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+    const totalHaziri = Number((totalHours / 8).toFixed(2));
+
+    return {
+      name: row.name,
+      dateValues,
+      totalHours,
+      totalHaziri,
+    };
+  });
+
+  const header = ["Name", ...dateLabels, "", "", "Total Hours", "", "", "Total Haziri"];
+  sheet.addRow(header);
+
+  for (const row of preparedRows) {
+    sheet.addRow([row.name, ...row.dateValues, "", "", row.totalHours, "", "", row.totalHaziri]);
+  }
+
+  sheet.addRow([]);
+  const foremanRow = sheet.addRow(["Foreman Name", payload.footer.foremanName]);
+  const inchargeRow = sheet.addRow(["Site Incharge Name", payload.footer.siteInchargeName]);
+  const siteRow = sheet.addRow(["Site Name", payload.footer.siteName]);
+
+  for (const footerRow of [foremanRow, inchargeRow, siteRow]) {
+    footerRow.getCell(1).font = { bold: true };
+    footerRow.getCell(2).font = { bold: true };
+  }
+
+  const dateStartCol = 2;
+  const dateEndCol = dateStartCol + dateLabels.length - 1;
+  const totalHoursCol = dateEndCol + 3;
+  const totalHaziriCol = totalHoursCol + 3;
+
+  const headerRow = sheet.getRow(1);
+  headerRow.height = 92;
+
+  for (let col = 1; col <= totalHaziriCol; col += 1) {
+    const cell = headerRow.getCell(col);
+    cell.font = { bold: true };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.border = {
+      top: { style: "thin" },
+      left: { style: "thin" },
+      bottom: { style: "thin" },
+      right: { style: "thin" },
+    };
+  }
+
+  for (let col = dateStartCol; col <= dateEndCol; col += 1) {
+    const cell = headerRow.getCell(col);
+    cell.alignment = {
+      vertical: "middle",
+      horizontal: "center",
+      textRotation: 90,
+      wrapText: true,
+    };
+  }
+
+  sheet.getColumn(1).width = 26;
+  for (let col = dateStartCol; col <= dateEndCol; col += 1) {
+    sheet.getColumn(col).width = 6;
+  }
+  sheet.getColumn(dateEndCol + 1).width = 4;
+  sheet.getColumn(dateEndCol + 2).width = 4;
+  sheet.getColumn(totalHoursCol).width = 14;
+  sheet.getColumn(totalHoursCol + 1).width = 4;
+  sheet.getColumn(totalHoursCol + 2).width = 4;
+  sheet.getColumn(totalHaziriCol).width = 14;
+
+  for (let rowIndex = 2; rowIndex <= preparedRows.length + 1; rowIndex += 1) {
+    const excelRow = sheet.getRow(rowIndex);
+    for (let col = 1; col <= totalHaziriCol; col += 1) {
+      const cell = excelRow.getCell(col);
+      cell.border = {
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
+      };
+      cell.alignment = {
+        vertical: "middle",
+        horizontal: col === 1 ? "left" : "center",
+      };
+
+      if (col === 1 || (col >= dateStartCol && col <= dateEndCol) || col === totalHoursCol || col === totalHaziriCol) {
+        if (typeof cell.value === "string" || typeof cell.value === "number") {
+          cell.font = { bold: true };
+        }
+      }
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+function buildPdf(payload: PivotExportResponse) {
+  const dateLabels = payload.dates.map((date) => format(parseISO(date), "dd/MM/yyyy"));
+  const verticalDateLabels = dateLabels.map((label) => label.split("").join("\n"));
+  const preparedRows: PreparedExportRow[] = payload.rows.map((row) => {
+    const dateValues = payload.dates.map((date) => {
+      const value = row.values[date];
+      return value === null || value === undefined ? "" : Number(value);
+    });
+
+    const totalHours = dateValues.reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+    const totalHaziri = Number((totalHours / 8).toFixed(2));
+
+    return {
+      name: row.name,
+      dateValues,
+      totalHours,
+      totalHaziri,
+    };
+  });
+
+  const headRow = ["Name", ...verticalDateLabels, "", "", "Total Hours", "", "", "Total Haziri"];
+  const bodyRows = preparedRows.map((row) => [row.name, ...row.dateValues, "", "", row.totalHours, "", "", row.totalHaziri]);
+
+  const doc = new jsPDF({ orientation: payload.dates.length > 7 ? "landscape" : "portrait" });
+
+  autoTable(doc, {
+    head: [headRow],
+    body: bodyRows,
+    startY: 12,
+    styles: { fontSize: 7, cellPadding: 1.4, halign: "center", valign: "middle", fontStyle: "normal" },
+    headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: "bold" },
+    bodyStyles: { fontStyle: "normal" },
+    didParseCell: (data) => {
+      if (data.section === "head" && data.column.index > 0 && data.column.index <= payload.dates.length) {
+        data.cell.styles.fontSize = 5.5;
+        data.cell.styles.minCellHeight = 24;
+      }
+
+      if (data.column.index === 0) {
+        data.cell.styles.halign = "left";
+        if (data.section === "body") {
+          data.cell.styles.fontStyle = "bold";
+        }
+      } else if (data.section === "body" && (data.column.index <= payload.dates.length || data.column.index > payload.dates.length + 2)) {
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+  });
+
+  const finalY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? 20;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Foreman Name: ${payload.footer.foremanName}`, 14, finalY + 8);
+  doc.text(`Site Incharge Name: ${payload.footer.siteInchargeName}`, 14, finalY + 14);
+  doc.text(`Site Name: ${payload.footer.siteName}`, 14, finalY + 20);
+  doc.setFont("helvetica", "normal");
+
+  return doc.output("blob");
+}
 
 export default function AdminAttendanceRecordsPage() {
   const [rows, setRows] = useState<RecordRow[]>([]);
@@ -84,6 +338,14 @@ export default function AdminAttendanceRecordsPage() {
   const [editingRows, setEditingRows] = useState<Record<string, EditingRow>>({});
   const [savingByRow, setSavingByRow] = useState<Record<string, boolean>>({});
   const [deletingByRow, setDeletingByRow] = useState<Record<string, boolean>>({});
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportFromDate, setExportFromDate] = useState("");
+  const [exportToDate, setExportToDate] = useState("");
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("EXCEL");
+  const [exportForemanSearch, setExportForemanSearch] = useState("");
+  const [selectedExportForeman, setSelectedExportForeman] = useState<User | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportDateError, setExportDateError] = useState("");
 
   useEffect(() => {
     async function loadData() {
@@ -228,6 +490,15 @@ export default function AdminAttendanceRecordsPage() {
       });
   }, [filteredRows]);
 
+  const exportForemanSuggestions = useMemo(() => {
+    const query = exportForemanSearch.trim().toLowerCase();
+    if (!query) return [];
+
+    return foremen
+      .filter((foreman) => foreman.name.toLowerCase().includes(query))
+      .slice(0, 6);
+  }, [exportForemanSearch, foremen]);
+
   const applyFilters = () => {
     setAppliedFilters(filterInputs);
   };
@@ -359,9 +630,83 @@ export default function AdminAttendanceRecordsPage() {
     }
   };
 
+  const openExportModal = () => {
+    const today = toIsoDate(new Date());
+    setExportFromDate(appliedFilters.fromDate || today);
+    setExportToDate(appliedFilters.toDate || today);
+    setExportDateError("");
+
+    if (appliedFilters.foremanFilter !== "ALL") {
+      const activeForeman = foremen.find((item) => item.id === appliedFilters.foremanFilter) ?? null;
+      setSelectedExportForeman(activeForeman);
+      setExportForemanSearch(activeForeman?.name ?? "");
+    } else {
+      setSelectedExportForeman(null);
+      setExportForemanSearch("");
+    }
+
+    setExportFormat("EXCEL");
+    setIsExportOpen(true);
+  };
+
+  const exportNow = async () => {
+    if (!exportFromDate || !exportToDate) {
+      toast.error("Please select both From and To dates");
+      return;
+    }
+
+    if (exportDateError || exportFromDate > exportToDate) {
+      toast.error("From date cannot be after To date");
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      const params = new URLSearchParams({ from: exportFromDate, to: exportToDate });
+      if (selectedExportForeman) {
+        params.set("foreman_id", selectedExportForeman.id);
+      }
+
+      const response = await fetch(`/api/attendance/export?${params.toString()}`);
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Failed to prepare export");
+      }
+
+      const payload = (await response.json()) as PivotExportResponse;
+      const dateStamp = format(new Date(), "yyyyMMdd_HHmm");
+      const foremanLabel = selectedExportForeman?.name.replace(/\s+/g, "_") ?? "All_Foremen";
+      const fileBase = `${foremanLabel}_${payload.from}_to_${payload.to}_${dateStamp}`;
+
+      if (exportFormat === "CSV") {
+        const csv = buildCsv(payload);
+        triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${fileBase}.csv`);
+      } else if (exportFormat === "EXCEL") {
+        const excelBlob = await buildExcel(payload);
+        triggerDownload(excelBlob, `${fileBase}.xlsx`);
+      } else {
+        const pdfBlob = buildPdf(payload);
+        triggerDownload(pdfBlob, `${fileBase}.pdf`);
+      }
+
+      setIsExportOpen(false);
+      toast.success("Export downloaded successfully");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <PageHeader title="Attendance Records" subtitle="Grouped by Site + Date → Site Incharge → Foreman" />
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <PageHeader title="Attendance Records" subtitle="Grouped by Site + Date → Site Incharge → Foreman" />
+        <Button type="button" onClick={openExportModal} className="w-full md:mt-1 md:w-auto">
+          <Download className="mr-2 h-4 w-4" />
+          Export
+        </Button>
+      </div>
 
       <GlassCard>
         <div className="grid gap-3 md:grid-cols-7">
@@ -668,6 +1013,148 @@ export default function AdminAttendanceRecordsPage() {
           </div>
         )}
       </GlassCard>
+
+      <Dialog open={isExportOpen} onOpenChange={setIsExportOpen}>
+        <DialogContent className="max-w-lg rounded-2xl border border-black bg-white p-5 text-black shadow-none">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold text-black">Export Attendance</DialogTitle>
+            <DialogDescription className="text-sm text-neutral-600">
+              Choose date range, optional foreman, and file format.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">From date</p>
+                <Input
+                  type="date"
+                  value={exportFromDate}
+                  max={exportToDate || undefined}
+                  onChange={(event) => {
+                    const nextFromDate = event.target.value;
+                    setExportFromDate(nextFromDate);
+
+                    if (exportToDate && nextFromDate && exportToDate < nextFromDate) {
+                      setExportToDate(nextFromDate);
+                      setExportDateError("To Date cannot be earlier than From Date. It has been adjusted automatically.");
+                      return;
+                    }
+
+                    setExportDateError("");
+                  }}
+                  className="h-12 w-full min-w-0 border-black/30 px-4 text-base text-black"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">To date</p>
+                <Input
+                  type="date"
+                  value={exportToDate}
+                  min={exportFromDate || undefined}
+                  onChange={(event) => {
+                    const nextToDate = event.target.value;
+                    setExportToDate(nextToDate);
+
+                    if (exportFromDate && nextToDate && nextToDate < exportFromDate) {
+                      setExportDateError("To Date cannot be earlier than From Date.");
+                      return;
+                    }
+
+                    setExportDateError("");
+                  }}
+                  aria-invalid={!!exportDateError}
+                  className="h-12 w-full min-w-0 border-black/30 px-4 text-base text-black"
+                />
+              </div>
+            </div>
+
+            {exportDateError ? <p className="text-xs font-medium text-black">{exportDateError}</p> : null}
+
+            <div className="relative space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">Foreman (optional)</p>
+              <Input
+                type="text"
+                value={exportForemanSearch}
+                onChange={(event) => {
+                  setExportForemanSearch(event.target.value);
+                  setSelectedExportForeman(null);
+                }}
+                placeholder="Search foreman by name"
+                className="border-black/30 text-black"
+              />
+
+              {selectedExportForeman ? (
+                <div className="flex items-center justify-between rounded-md border border-black/20 bg-white px-3 py-2 text-sm">
+                  <span>Selected: {selectedExportForeman.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedExportForeman(null);
+                      setExportForemanSearch("");
+                    }}
+                    className="text-xs font-semibold text-black"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
+
+              {!selectedExportForeman && exportForemanSuggestions.length > 0 ? (
+                <div className="absolute z-20 mt-1 w-full rounded-md border border-black/20 bg-white p-1 shadow-sm">
+                  {exportForemanSuggestions.map((foreman) => (
+                    <button
+                      key={foreman.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedExportForeman(foreman);
+                        setExportForemanSearch(foreman.name);
+                      }}
+                      className="block w-full rounded px-2 py-2 text-left text-sm text-black hover:bg-neutral-100"
+                    >
+                      {foreman.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">File format</p>
+              <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as ExportFormat)}>
+                <SelectTrigger className="border-black/30 text-black">
+                  <SelectValue placeholder="Select file format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CSV">CSV</SelectItem>
+                  <SelectItem value="EXCEL">Excel</SelectItem>
+                  <SelectItem value="PDF">PDF</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter className="-mx-5 -mb-5 border-t border-black/10 bg-white px-5 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-black text-black"
+              onClick={() => setIsExportOpen(false)}
+              disabled={isExporting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={exportNow}
+              className="bg-black text-white hover:bg-black/90"
+              disabled={isExporting || !!exportDateError}
+            >
+              {isExporting ? "Exporting..." : "Export Now"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

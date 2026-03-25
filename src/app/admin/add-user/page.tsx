@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Site, User, UserRole } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type UserForm = {
   name: string;
@@ -75,6 +76,16 @@ export default function AdminAddUserPage() {
     if (form.site_id === "NONE") return siteIncharges;
     return siteIncharges.filter((si) => si.site_id === form.site_id);
   }, [form.site_id, siteIncharges]);
+
+  const siteNameById = useMemo(
+    () => Object.fromEntries(sites.map((site) => [site.id, site.name?.trim() || site.id])),
+    [sites],
+  );
+
+  const siNameById = useMemo(
+    () => Object.fromEntries(siteIncharges.map((si) => [si.id, si.name?.trim() || si.username || si.id])),
+    [siteIncharges],
+  );
 
   const showSiteField = form.role === "SITE_INCHARGE" || form.role === "FOREMAN";
   const showParentField = form.role === "FOREMAN";
@@ -234,7 +245,9 @@ export default function AdminAddUserPage() {
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select site" />
+                      <span className={cn("truncate", form.site_id === "NONE" && "text-muted-foreground")}>
+                        {form.site_id === "NONE" ? "Select site" : (siteNameById[form.site_id] ?? "Select site")}
+                      </span>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="NONE">Select site</SelectItem>
@@ -253,13 +266,15 @@ export default function AdminAddUserPage() {
                   <Label>Parent SI</Label>
                   <Select value={form.parent_id} onValueChange={(value) => updateForm("parent_id", value ?? "NONE")}>
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select parent SI" />
+                      <span className={cn("truncate", form.parent_id === "NONE" && "text-muted-foreground")}>
+                        {form.parent_id === "NONE" ? "Select parent SI" : (siNameById[form.parent_id] ?? "Select parent SI")}
+                      </span>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="NONE">Select SI</SelectItem>
                       {parentSiOptions.map((si) => (
                         <SelectItem key={si.id} value={si.id}>
-                          {si.name}
+                          {si.name || si.username}
                         </SelectItem>
                       ))}
                     </SelectContent>
