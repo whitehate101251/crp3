@@ -9,12 +9,13 @@ import {
   FileSpreadsheet,
   LayoutDashboard,
   Settings2,
+  User,
   UserPlus,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const items = [
+export const adminNavItems = [
   { href: "/admin", label: "Home", Icon: LayoutDashboard },
   { href: "/admin/approval", label: "Admin Approval", Icon: CheckSquare },
   { href: "/admin/sites", label: "Manage Sites", Icon: Building2 },
@@ -23,6 +24,7 @@ const items = [
   { href: "/admin/attendance", label: "Status", Icon: ClipboardList },
   { href: "/admin/attendance-records", label: "Attendance Records", Icon: FileSpreadsheet },
   { href: "/admin/si-attendance", label: "SI Attendance", Icon: Users },
+  { href: "/admin/profile", label: "Profile", Icon: User },
 ];
 
 export function AdminSidebar() {
@@ -32,7 +34,7 @@ export function AdminSidebar() {
     <aside className="glass-card h-full min-h-screen w-full p-4">
       <p className="mb-4 px-2 text-sm font-semibold text-slate-700">Construction ERP</p>
       <nav className="space-y-1">
-        {items.map(({ href, label, Icon }) => {
+        {adminNavItems.map(({ href, label, Icon }) => {
           const active = pathname === href;
           return (
             <Link

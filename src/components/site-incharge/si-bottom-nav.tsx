@@ -16,7 +16,7 @@ export function SIBottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="glass-card fixed inset-x-3 bottom-3 z-20 grid grid-cols-4 gap-1 p-2 md:hidden">
+    <nav className="glass-card fixed inset-x-3 bottom-3 z-20 grid grid-cols-4 gap-2 bg-white/85 p-2">
       {items.map(({ href, label, Icon }) => {
         const active = pathname === href;
         return (
@@ -24,7 +24,7 @@ export function SIBottomNav() {
             key={href}
             href={href}
             className={cn(
-              "flex min-h-12 flex-col items-center justify-center rounded-lg px-1 text-[11px]",
+              "flex min-h-12 flex-col items-center justify-center rounded-lg px-1 text-xs",
               active ? "bg-slate-800 text-white" : "text-slate-700",
             )}
           >

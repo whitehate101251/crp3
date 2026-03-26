@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { Check, ChevronDown, ChevronRight, Download, Pencil, Search, Trash2, X } from "lucide-react";
+import { Calendar as CalendarIcon, Check, ChevronDown, ChevronRight, Download, Pencil, Search, Trash2, X } from "lucide-react";
 import ExcelJS from "exceljs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -11,14 +11,19 @@ import { GlassCard } from "@/components/shared/glass-card";
 import { PageLoadingSkeleton } from "@/components/shared/page-loading-skeleton";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
 import type { AttendanceRecord, AttendanceSheet, Site, User, Worker } from "@/lib/types";
 
 type RecordRow = {
   id: string;
+  sheetId: string;
   date: string;
   workerName: string;
   siteName: string;
@@ -48,6 +53,7 @@ type Filters = {
 };
 
 type ForemanGroup = {
+  sheetId: string;
   foremanId: string;
   foremanName: string;
   rows: RecordRow[];
@@ -99,6 +105,11 @@ const defaultFilters: Filters = {
 
 function toIsoDate(value: Date) {
   return value.toISOString().slice(0, 10);
+}
+
+function fromIsoDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function csvCell(value: string | number | null | undefined) {
@@ -338,9 +349,19 @@ export default function AdminAttendanceRecordsPage() {
   const [editingRows, setEditingRows] = useState<Record<string, EditingRow>>({});
   const [savingByRow, setSavingByRow] = useState<Record<string, boolean>>({});
   const [deletingByRow, setDeletingByRow] = useState<Record<string, boolean>>({});
+  const [sheetDeleteOpen, setSheetDeleteOpen] = useState(false);
+  const [sheetDeleteConfirmed, setSheetDeleteConfirmed] = useState(false);
+  const [deletingSheetId, setDeletingSheetId] = useState<string | null>(null);
+  const [sheetPendingDelete, setSheetPendingDelete] = useState<{
+    sheetId: string;
+    foremanName: string;
+    date: string;
+  } | null>(null);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportFromDate, setExportFromDate] = useState("");
   const [exportToDate, setExportToDate] = useState("");
+  const [exportFromCalendarOpen, setExportFromCalendarOpen] = useState(false);
+  const [exportToCalendarOpen, setExportToCalendarOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("EXCEL");
   const [exportForemanSearch, setExportForemanSearch] = useState("");
   const [selectedExportForeman, setSelectedExportForeman] = useState<User | null>(null);
@@ -397,6 +418,7 @@ export default function AdminAttendanceRecordsPage() {
           const records = recordsBySheet[sheet.id] ?? [];
           return records.map((record) => ({
             id: record.id,
+            sheetId: sheet.id,
             date: sheet.date,
             workerName: workerNameById[record.worker_id] ?? record.worker_id,
             siteName: siteNameById[sheet.site_id] ?? sheet.site_id,
@@ -452,7 +474,7 @@ export default function AdminAttendanceRecordsPage() {
       }
 
       const foremanMap = inchargeMap.get(inchargeKey)!;
-      const foremanKey = `${row.foremanId}||${row.foremanName}`;
+      const foremanKey = `${row.foremanId}||${row.foremanName}||${row.sheetId}`;
       if (!foremanMap.has(foremanKey)) {
         foremanMap.set(foremanKey, []);
       }
@@ -468,8 +490,9 @@ export default function AdminAttendanceRecordsPage() {
           .map(([siteInchargeName, foremanMap]) => {
             const foremen: ForemanGroup[] = [...foremanMap.entries()]
               .map(([foremanKey, records]) => {
-                const [foremanId, foremanName] = foremanKey.split("||");
+                const [foremanId, foremanName, sheetId] = foremanKey.split("||");
                 return {
+                  sheetId,
                   foremanId,
                   foremanName,
                   rows: records.slice().sort((a, b) => a.workerName.localeCompare(b.workerName)),
@@ -627,6 +650,69 @@ export default function AdminAttendanceRecordsPage() {
       toast.error(error instanceof Error ? error.message : "Unable to delete record");
     } finally {
       setDeletingByRow((prev) => ({ ...prev, [row.id]: false }));
+    }
+  };
+
+  const openSheetDeleteDialog = (sheetId: string, foremanName: string, date: string) => {
+    setSheetPendingDelete({ sheetId, foremanName, date });
+    setSheetDeleteConfirmed(false);
+    setSheetDeleteOpen(true);
+  };
+
+  const deleteAttendanceSheet = async () => {
+    if (!sheetPendingDelete || !sheetDeleteConfirmed) return;
+
+    try {
+      setDeletingSheetId(sheetPendingDelete.sheetId);
+
+      const response = await fetch("/api/attendance/sheets", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheet_id: sheetPendingDelete.sheetId }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Failed to delete attendance sheet");
+      }
+
+      setRows((prev) => prev.filter((row) => row.sheetId !== sheetPendingDelete.sheetId));
+      setEditingRows((prev) => {
+        const updated = { ...prev };
+        for (const row of rows) {
+          if (row.sheetId === sheetPendingDelete.sheetId) {
+            delete updated[row.id];
+          }
+        }
+        return updated;
+      });
+      setSavingByRow((prev) => {
+        const updated = { ...prev };
+        for (const row of rows) {
+          if (row.sheetId === sheetPendingDelete.sheetId) {
+            delete updated[row.id];
+          }
+        }
+        return updated;
+      });
+      setDeletingByRow((prev) => {
+        const updated = { ...prev };
+        for (const row of rows) {
+          if (row.sheetId === sheetPendingDelete.sheetId) {
+            delete updated[row.id];
+          }
+        }
+        return updated;
+      });
+
+      toast.success("Attendance sheet deleted");
+      setSheetDeleteOpen(false);
+      setSheetDeleteConfirmed(false);
+      setSheetPendingDelete(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete attendance sheet");
+    } finally {
+      setDeletingSheetId(null);
     }
   };
 
@@ -853,22 +939,36 @@ export default function AdminAttendanceRecordsPage() {
                             {isInchargeExpanded && (
                               <div className="space-y-2 border-t border-slate-100 p-2">
                                 {incharge.foremen.map((foreman) => {
-                                  const foremanKey = `${inchargeKey}|${foreman.foremanId}`;
+                                  const foremanKey = `${inchargeKey}|${foreman.foremanId}|${foreman.sheetId}`;
                                   const isForemanExpanded = expandedForemen[foremanKey] ?? false;
+                                  const isSheetDeleting = deletingSheetId === foreman.sheetId;
 
                                   return (
                                     <div key={foremanKey} className="rounded-md border border-slate-200 bg-white">
-                                      <button
-                                        type="button"
-                                        onClick={() => setExpandedForemen((prev) => ({ ...prev, [foremanKey]: !isForemanExpanded }))}
-                                        className="flex w-full items-center justify-between px-3 py-2 text-left"
-                                      >
-                                        <div className="flex items-center gap-2">
-                                          {isForemanExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
-                                          <p className="text-sm font-medium text-slate-700">{foreman.foremanName}</p>
-                                        </div>
-                                        <p className="text-xs text-slate-500">{foreman.rows.length} workers</p>
-                                      </button>
+                                      <div className="flex items-center justify-between px-3 py-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => setExpandedForemen((prev) => ({ ...prev, [foremanKey]: !isForemanExpanded }))}
+                                          className="flex flex-1 items-center justify-between text-left"
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            {isForemanExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
+                                            <p className="text-sm font-medium text-slate-700">{foreman.foremanName}</p>
+                                          </div>
+                                          <p className="text-xs text-slate-500">{foreman.rows.length} workers</p>
+                                        </button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="ml-3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                          onClick={() => openSheetDeleteDialog(foreman.sheetId, foreman.foremanName, siteDateGroup.date)}
+                                          disabled={isSheetDeleting}
+                                        >
+                                          <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                          {isSheetDeleting ? "Deleting..." : "Delete Sheet"}
+                                        </Button>
+                                      </div>
 
                                       {isForemanExpanded && (
                                         <div className="overflow-x-auto border-t border-slate-100 p-2">
@@ -1014,7 +1114,73 @@ export default function AdminAttendanceRecordsPage() {
         )}
       </GlassCard>
 
-      <Dialog open={isExportOpen} onOpenChange={setIsExportOpen}>
+      <Dialog
+        open={sheetDeleteOpen}
+        onOpenChange={(open) => {
+          setSheetDeleteOpen(open);
+          if (!open) {
+            setSheetDeleteConfirmed(false);
+            setSheetPendingDelete(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete attendance sheet</DialogTitle>
+            <DialogDescription>
+              {sheetPendingDelete
+                ? `Do you want to delete ${sheetPendingDelete.foremanName} entry from your records? This can't be undone.`
+                : "Do you want to delete this entry from your records? This can't be undone."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/60 p-3">
+            <Checkbox
+              id="confirm-sheet-delete"
+              checked={sheetDeleteConfirmed}
+              onCheckedChange={(checked) => setSheetDeleteConfirmed(checked === true)}
+              disabled={!!deletingSheetId}
+            />
+            <Label htmlFor="confirm-sheet-delete" className="text-sm leading-5 text-red-700">
+              I understand this can&apos;t be undone.
+            </Label>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setSheetDeleteOpen(false);
+                setSheetDeleteConfirmed(false);
+                setSheetPendingDelete(null);
+              }}
+              disabled={!!deletingSheetId}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={deleteAttendanceSheet}
+              disabled={!sheetDeleteConfirmed || !sheetPendingDelete || !!deletingSheetId}
+            >
+              {deletingSheetId ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isExportOpen}
+        onOpenChange={(open) => {
+          setIsExportOpen(open);
+          if (!open) {
+            setExportFromCalendarOpen(false);
+            setExportToCalendarOpen(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg rounded-2xl border border-black bg-white p-5 text-black shadow-none">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold text-black">Export Attendance</DialogTitle>
@@ -1027,45 +1193,67 @@ export default function AdminAttendanceRecordsPage() {
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">From date</p>
-                <Input
-                  type="date"
-                  value={exportFromDate}
-                  max={exportToDate || undefined}
-                  onChange={(event) => {
-                    const nextFromDate = event.target.value;
-                    setExportFromDate(nextFromDate);
+                <Popover open={exportFromCalendarOpen} onOpenChange={setExportFromCalendarOpen}>
+                  <PopoverTrigger className="flex h-12 w-full min-w-0 items-center justify-between rounded-md border border-black/30 bg-white px-4 text-left text-base text-black">
+                    <span>{exportFromDate ? formatDate(exportFromDate) : "Select from date"}</span>
+                    <CalendarIcon className="h-4 w-4 text-neutral-600" />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" side="bottom" className="w-auto p-1">
+                    <Calendar
+                      mode="single"
+                      selected={exportFromDate ? fromIsoDate(exportFromDate) : undefined}
+                      disabled={exportToDate ? (date) => date > fromIsoDate(exportToDate) : undefined}
+                      onSelect={(date) => {
+                        if (!date) return;
 
-                    if (exportToDate && nextFromDate && exportToDate < nextFromDate) {
-                      setExportToDate(nextFromDate);
-                      setExportDateError("To Date cannot be earlier than From Date. It has been adjusted automatically.");
-                      return;
-                    }
+                        const nextFromDate = toIsoDate(date);
+                        setExportFromDate(nextFromDate);
 
-                    setExportDateError("");
-                  }}
-                  className="h-12 w-full min-w-0 border-black/30 px-4 text-base text-black"
-                />
+                        if (exportToDate && exportToDate < nextFromDate) {
+                          setExportToDate(nextFromDate);
+                          setExportDateError("To Date cannot be earlier than From Date. It has been adjusted automatically.");
+                        } else {
+                          setExportDateError("");
+                        }
+
+                        setExportFromCalendarOpen(false);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">To date</p>
-                <Input
-                  type="date"
-                  value={exportToDate}
-                  min={exportFromDate || undefined}
-                  onChange={(event) => {
-                    const nextToDate = event.target.value;
-                    setExportToDate(nextToDate);
+                <Popover open={exportToCalendarOpen} onOpenChange={setExportToCalendarOpen}>
+                  <PopoverTrigger
+                    aria-invalid={!!exportDateError}
+                    className="flex h-12 w-full min-w-0 items-center justify-between rounded-md border border-black/30 bg-white px-4 text-left text-base text-black"
+                  >
+                    <span>{exportToDate ? formatDate(exportToDate) : "Select to date"}</span>
+                    <CalendarIcon className="h-4 w-4 text-neutral-600" />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" side="bottom" className="w-auto p-1">
+                    <Calendar
+                      mode="single"
+                      selected={exportToDate ? fromIsoDate(exportToDate) : undefined}
+                      disabled={exportFromDate ? (date) => date < fromIsoDate(exportFromDate) : undefined}
+                      onSelect={(date) => {
+                        if (!date) return;
 
-                    if (exportFromDate && nextToDate && nextToDate < exportFromDate) {
-                      setExportDateError("To Date cannot be earlier than From Date.");
-                      return;
-                    }
+                        const nextToDate = toIsoDate(date);
+                        setExportToDate(nextToDate);
 
-                    setExportDateError("");
-                  }}
-                  aria-invalid={!!exportDateError}
-                  className="h-12 w-full min-w-0 border-black/30 px-4 text-base text-black"
-                />
+                        if (exportFromDate && nextToDate < exportFromDate) {
+                          setExportDateError("To Date cannot be earlier than From Date.");
+                        } else {
+                          setExportDateError("");
+                        }
+
+                        setExportToCalendarOpen(false);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 

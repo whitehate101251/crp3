@@ -32,6 +32,7 @@ export default function AdminApprovalPage() {
   const [savingByRecord, setSavingByRecord] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [approvingSheetId, setApprovingSheetId] = useState<string | null>(null);
+  const [approvingAll, setApprovingAll] = useState(false);
   const [searchInput, setSearchInput] = useState("");
 
   const fetchRecords = useCallback(async (sheetId: string) => {
@@ -256,6 +257,71 @@ export default function AdminApprovalPage() {
     }
   };
 
+  const approveAllSheets = async () => {
+    if (pendingSheets.length === 0) return;
+
+    const shouldApproveAll = window.confirm("This will approve all of the attendances pending for admin approval. Do you want to continue?");
+    if (!shouldApproveAll) return;
+
+    const sheetsToApprove = [...pendingSheets];
+
+    try {
+      setApprovingAll(true);
+
+      const results = await Promise.all(
+        sheetsToApprove.map(async (sheet) => {
+          const response = await fetch("/api/attendance/approve", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sheet_id: sheet.id }),
+          });
+
+          if (!response.ok) {
+            const data = (await response.json()) as { error?: string };
+            return {
+              ok: false as const,
+              sheet,
+              error: data.error ?? "Approval failed",
+            };
+          }
+
+          const updatedSheet = (await response.json()) as AttendanceSheet;
+          return {
+            ok: true as const,
+            sheet,
+            approvedAt: updatedSheet.approved_at ?? new Date().toISOString(),
+          };
+        })
+      );
+
+      const succeeded = results.filter((result) => result.ok);
+      const failed = results.filter((result) => !result.ok);
+
+      if (succeeded.length > 0) {
+        const approvedIds = new Set(succeeded.map((result) => result.sheet.id));
+        setPendingSheets((prev) => prev.filter((sheet) => !approvedIds.has(sheet.id)));
+        setTodayApprovedSheets((prev) => [
+          ...succeeded.map((result) => ({
+            ...result.sheet,
+            status: "APPROVED" as const,
+            approved_at: result.approvedAt,
+          })),
+          ...prev,
+        ]);
+        toast.success(`Approved ${succeeded.length} sheet${succeeded.length === 1 ? "" : "s"}`);
+      }
+
+      if (failed.length > 0) {
+        const firstError = failed[0].error;
+        toast.error(`${failed.length} sheet${failed.length === 1 ? "" : "s"} could not be approved. ${firstError}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Approve all failed");
+    } finally {
+      setApprovingAll(false);
+    }
+  };
+
   const renderRecordTable = (sheetId: string) => {
     const records = recordsBySheet[sheetId] ?? [];
     if (records.length === 0) {
@@ -387,7 +453,14 @@ export default function AdminApprovalPage() {
 
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm font-semibold text-slate-800">Pending Approvals</p>
-          <p className="text-xs text-slate-500">{pendingSheets.length} pending</p>
+          <button
+            type="button"
+            onClick={approveAllSheets}
+            disabled={loading || approvingAll || pendingSheets.length === 0}
+            className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {approvingAll ? "Approving all..." : `Approve all (${pendingSheets.length})`}
+          </button>
         </div>
 
         {loading ? (
@@ -419,7 +492,7 @@ export default function AdminApprovalPage() {
                     <button
                       type="button"
                       onClick={() => approveSheet(sheet)}
-                      disabled={isApproving || hasInvalidPresentHours}
+                      disabled={approvingAll || isApproving || hasInvalidPresentHours}
                       className="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isApproving ? "Approving..." : "Approve"}
@@ -467,6 +540,7 @@ export default function AdminApprovalPage() {
           )}
         </div>
       </details>
+
     </div>
   );
 }

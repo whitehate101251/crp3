@@ -75,3 +75,55 @@ export async function GET(request: Request) {
 
   return NextResponse.json(data ?? []);
 }
+
+export async function DELETE(request: Request) {
+  const user = await getRequestSessionUser(request);
+  if (!user || user.role !== "ADMIN") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
+  try {
+    const body = await request.json();
+    const sheetId = String(body.sheet_id ?? "").trim();
+
+    if (!sheetId) {
+      return NextResponse.json({ error: "sheet_id is required" }, { status: 400 });
+    }
+
+    const { data: existingSheet, error: existingError } = await supabaseAdmin
+      .from("attendance_sheets")
+      .select("id")
+      .eq("id", sheetId)
+      .maybeSingle();
+
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 400 });
+    }
+
+    if (!existingSheet) {
+      return NextResponse.json({ error: "Attendance sheet not found" }, { status: 404 });
+    }
+
+    const { error: recordsDeleteError } = await supabaseAdmin
+      .from("attendance_records")
+      .delete()
+      .eq("sheet_id", sheetId);
+
+    if (recordsDeleteError) {
+      return NextResponse.json({ error: recordsDeleteError.message }, { status: 400 });
+    }
+
+    const { error: sheetDeleteError } = await supabaseAdmin
+      .from("attendance_sheets")
+      .delete()
+      .eq("id", sheetId);
+
+    if (sheetDeleteError) {
+      return NextResponse.json({ error: sheetDeleteError.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, sheet_id: sheetId });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to delete attendance sheet" }, { status: 400 });
+  }
+}

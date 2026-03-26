@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { GlassCard } from "@/components/shared/glass-card";
+import { LogoutButton } from "@/components/shared/logout-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -204,6 +205,14 @@ export default function AdminProfilePage() {
           </Button>
         </div>
       </GlassCard>
+
+      <div className="flex justify-center pt-2">
+        <LogoutButton
+          variant="destructive"
+          label="Logout"
+          className="h-12 w-full max-w-sm text-base font-semibold"
+        />
+      </div>
     </div>
   );
 }
