@@ -45,6 +45,7 @@ export default function AdminSIAttendancePage() {
   const [manualDateInput, setManualDateInput] = useState(TODAY);
   const [dateOpen, setDateOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [savingBySi, setSavingBySi] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     async function loadEntries() {
@@ -79,6 +80,37 @@ export default function AdminSIAttendancePage() {
       return;
     }
     setSelectedDate(manualDateInput);
+  };
+
+  const updateAttendanceStatus = async (entry: SIAttendanceEntry, newStatus: "PRESENT" | "ABSENT") => {
+    const key = `${entry.si_user_id}-${entry.date}`;
+    setSavingBySi((prev) => ({ ...prev, [key]: true }));
+
+    try {
+      const response = await fetch("/api/attendance/si-attendance", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          si_user_id: entry.si_user_id,
+          date: entry.date,
+          status: newStatus,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update attendance");
+      }
+
+      const updatedEntry = (await response.json()) as SIAttendanceEntry;
+      setEntries((prev) =>
+        prev.map((e) => (e.si_user_id === entry.si_user_id && e.date === entry.date ? updatedEntry : e))
+      );
+      toast.success(`${entry.name} marked as ${newStatus === "PRESENT" ? "Present" : "Absent"}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update attendance");
+    } finally {
+      setSavingBySi((prev) => ({ ...prev, [key]: false }));
+    }
   };
 
   return (
@@ -158,28 +190,43 @@ export default function AdminSIAttendancePage() {
                 <TableHead>Father Name</TableHead>
                 <TableHead>Phone Number</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell>{formatDate(entry.date)}</TableCell>
-                  <TableCell className="font-medium text-slate-800">{entry.name}</TableCell>
-                  <TableCell>{entry.father_name ?? "—"}</TableCell>
-                  <TableCell>{entry.phone_number ?? "—"}</TableCell>
-                  <TableCell>
-                    <span
-                      className={
-                        entry.status === "PRESENT"
-                          ? "inline-flex rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700"
-                          : "inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700"
-                      }
-                    >
-                      {entry.status === "PRESENT" ? "Present" : "Absent"}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {entries.map((entry) => {
+                const key = `${entry.si_user_id}-${entry.date}`;
+                const isSaving = savingBySi[key] || false;
+                return (
+                  <TableRow key={key}>
+                    <TableCell>{formatDate(entry.date)}</TableCell>
+                    <TableCell className="font-medium text-slate-800">{entry.name}</TableCell>
+                    <TableCell>{entry.father_name ?? "—"}</TableCell>
+                    <TableCell>{entry.phone_number ?? "—"}</TableCell>
+                    <TableCell>
+                      <span
+                        className={
+                          entry.status === "PRESENT"
+                            ? "inline-flex rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700"
+                            : "inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700"
+                        }
+                      >
+                        {entry.status === "PRESENT" ? "Present" : "Absent"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant={entry.status === "PRESENT" ? "outline" : "default"}
+                        disabled={isSaving}
+                        onClick={() => updateAttendanceStatus(entry, entry.status === "PRESENT" ? "ABSENT" : "PRESENT")}
+                      >
+                        {isSaving ? "Saving..." : entry.status === "PRESENT" ? "Mark Absent" : "Mark Present"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

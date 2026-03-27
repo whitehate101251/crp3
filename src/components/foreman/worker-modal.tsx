@@ -62,7 +62,7 @@ export function WorkerModal({ open, onOpenChange, worker, onChange, onPrev, onNe
                 type="number"
                 min={0}
                 max={X_MAX}
-                className="h-12 text-base"
+                className="h-12 text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 disabled={!worker.present}
                 value={worker.x_value}
                 onChange={(event) => onChange({ ...worker, x_value: clampXValue(Number(event.target.value || 0)) })}
@@ -86,7 +86,7 @@ export function WorkerModal({ open, onOpenChange, worker, onChange, onPrev, onNe
                 type="number"
                 min={0}
                 max={Y_MAX}
-                className="h-12 text-base"
+                className="h-12 text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 disabled={!worker.present}
                 value={worker.y_value}
                 onChange={(event) => onChange({ ...worker, y_value: clampYValue(Number(event.target.value || 0)) })}

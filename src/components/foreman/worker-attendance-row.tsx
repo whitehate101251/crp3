@@ -50,6 +50,7 @@ export function WorkerAttendanceRow({ worker, onChange, onOpenDetail }: WorkerAt
             type="number"
             min={0}
             max={X_MAX}
+            className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             value={worker.x_value}
             disabled={!worker.present}
             onChange={(event) =>
@@ -66,6 +67,7 @@ export function WorkerAttendanceRow({ worker, onChange, onOpenDetail }: WorkerAt
             type="number"
             min={0}
             max={Y_MAX}
+            className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             value={worker.y_value}
             disabled={!worker.present}
             onChange={(event) =>

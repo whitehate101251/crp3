@@ -108,3 +108,83 @@ export async function GET(request: Request) {
 
   return NextResponse.json((data ?? []) as SIAttendanceEntry[]);
 }
+
+export async function PATCH(request: Request) {
+  const user = await getRequestSessionUser(request);
+  if (!user || user.role !== "ADMIN") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  const { si_user_id, date, status } = body;
+
+  if (!si_user_id || !date || !status) {
+    return NextResponse.json(
+      { error: "Missing required fields: si_user_id, date, status" },
+      { status: 400 }
+    );
+  }
+
+  if (!["PRESENT", "ABSENT"].includes(status)) {
+    return NextResponse.json(
+      { error: "Status must be PRESENT or ABSENT" },
+      { status: 400 }
+    );
+  }
+
+  // Verify SI user exists and has role SITE_INCHARGE
+  const { data: siUser, error: siUserError } = await supabaseAdmin
+    .from("users")
+    .select("id, name, father_name, phone, site_id")
+    .eq("id", si_user_id)
+    .eq("role", "SITE_INCHARGE")
+    .single();
+
+  if (siUserError || !siUser) {
+    return NextResponse.json(
+      { error: "SI user not found or invalid role" },
+      { status: 404 }
+    );
+  }
+
+  // Check if entry already exists to preserve source_sheet_id
+  const { data: existingEntry } = await supabaseAdmin
+    .from("si_attendance_entries")
+    .select("source_sheet_id")
+    .eq("si_user_id", si_user_id)
+    .eq("date", date)
+    .single();
+
+  const { data: upsertedEntry, error: upsertError } = await supabaseAdmin
+    .from("si_attendance_entries")
+    .upsert(
+      {
+        si_user_id,
+        date,
+        status,
+        site_id: siUser.site_id,
+        name: siUser.name,
+        father_name: siUser.father_name ?? null,
+        phone_number: siUser.phone ?? null,
+        source_sheet_id: existingEntry?.source_sheet_id ?? null,
+      },
+      { onConflict: "si_user_id,date" }
+    )
+    .select()
+    .single();
+
+  if (upsertError) {
+    return NextResponse.json(
+      { error: upsertError.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json(upsertedEntry as SIAttendanceEntry);
+}

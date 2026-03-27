@@ -44,7 +44,6 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <GlassCard className="w-full max-w-md" padding="lg">
         <h1 className="text-2xl font-semibold text-slate-900">Construction ERP</h1>
-        <p className="mt-1 text-sm text-slate-600">Temporary login for functional UI setup.</p>
 
         <form className="mt-6 space-y-4" onSubmit={onLogin}>
           <div className="space-y-2">
