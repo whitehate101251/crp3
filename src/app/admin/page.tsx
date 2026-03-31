@@ -55,7 +55,7 @@ export default function AdminHomePage() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Admin Dashboard" subtitle="Loading..." />
+        <PageHeader title="Welcome back" subtitle="Loading..." />
         <PageLoadingSkeleton rows={4} />
       </div>
     );
@@ -63,7 +63,7 @@ export default function AdminHomePage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Admin Dashboard" subtitle={user ? `Welcome back, ${user.name}` : "Temporary functional layout"} />
+      <PageHeader title={user ? `Welcome back, ${user.name}` : "Welcome back"} />
       <div className="grid gap-4 md:grid-cols-3">
         <GlassCard>
           <p className="text-sm text-slate-600">Total Sites</p>

@@ -32,7 +32,7 @@ export function AdminSidebar() {
 
   return (
     <aside className="glass-card h-full min-h-screen w-full p-4">
-      <p className="mb-4 px-2 text-sm font-semibold text-slate-700">Construction ERP</p>
+      <p className="mb-4 px-2 text-lg font-semibold text-slate-700">Timri Constructions</p>
       <nav className="space-y-1">
         {adminNavItems.map(({ href, label, Icon }) => {
           const active = pathname === href;

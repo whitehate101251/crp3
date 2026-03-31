@@ -56,7 +56,7 @@ export default function SiteInchargeHomePage() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Site Incharge Home" subtitle="Loading..." />
+        <PageHeader title="Timri Constructions" subtitle="Loading..." subtitleClassName="text-base" />
         <PageLoadingSkeleton rows={3} />
       </div>
     );
@@ -64,7 +64,7 @@ export default function SiteInchargeHomePage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Site Incharge Home" subtitle={user ? `Welcome back, ${user.name}` : "Mobile-first temporary dashboard"} />
+      <PageHeader title="Timri Constructions" subtitle={user ? `Welcome back, ${user.name}` : "Mobile-first temporary dashboard"} subtitleClassName="text-base" />
       <Link href="/site-incharge/review" className="block">
         <GlassCard className="space-y-2">
           <p className="text-sm text-slate-600">Pending Reviews</p>

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { Language } from "@/lib/translations/foreman";
 
 type LanguageContextType = {
@@ -11,18 +11,15 @@ type LanguageContextType = {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<Language>(() => {
-    if (typeof window === "undefined") {
-      return "en";
-    }
+  const [language, setLanguage] = useState<Language>("en");
 
+  useEffect(() => {
     const saved = localStorage.getItem("foreman-language");
     if (saved === "en" || saved === "hi") {
-      return saved;
+      setLanguage(saved);
     }
+  }, []);
 
-    return "en";
-  });
   const switchLanguage = (lang: Language) => {
     setLanguage(lang);
     localStorage.setItem("foreman-language", lang);

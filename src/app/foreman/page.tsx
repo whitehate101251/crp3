@@ -54,7 +54,7 @@ export default function ForemanHomePage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Foreman Home" subtitle={user ? `Welcome back, ${user.name}` : "Mobile-first dashboard"} />
+      <PageHeader title="Timri Constructions" subtitle={user ? `Welcome back, ${user.name}` : "Mobile-first dashboard"} subtitleClassName="text-base" />
       <div className="grid gap-4">
         <Link href="/foreman/workers" className="block">
           <GlassCard>
